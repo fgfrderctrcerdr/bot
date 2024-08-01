@@ -1,0 +1,1125 @@
+import datetime
+import re
+from aiogram import Router, types, F
+from aiogram.types import ReplyKeyboardRemove
+from aiogram.filters import or_f, Command, CommandStart, StateFilter
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+from keyboards import conference_booking_mark_up, start_mark_up, contact_asker
+
+main_router = Router()
+
+class booking_data():
+    def __init__(self, user, number, hall, date, timer_first, timer_second):
+        self.user = user
+        self.number = number
+        self.hall = hall
+        self.date = date
+        self.timer_first = timer_first
+        self.timer_second = timer_second
+
+absolute_data = booking_data(None, None, None, None, None, None)
+
+class FSM_conference(StatesGroup):
+    phone = State()
+    hall = State()
+    # date = State()
+    date = State()
+    timer_first = State()
+    timer_second = State()
+
+# @main_router.callback_query(F.data == 'func')
+# async def callbacker(callback : types.CallbackQuery):
+    # await callback.answer('текст уведомления', show_alert = True чтобы всплывало окно) Чтобы перестала светиться кнопка
+#     await callback.message.answer('Callback функция')
+    # если надо поменять текст сообщения то:  
+    # wait callback.message.edit_text('Callback функция', reply_markup = 'инлайн клавиатура')
+
+@main_router.message(CommandStart(), StateFilter(None))
+async def orderer(msg : types.Message):
+    await msg.answer('Добро пожаловать!\nВыберите, что хотите сделать:', reply_markup=start_mark_up.as_markup(
+        resize_keyboard = True,
+        input_field_placeholder = 'Что хотите сделать?'
+    ))
+
+@main_router.message(F.text == 'Забронировать зал', StateFilter(None))
+async def contacter(msg : types.Message, state : FSMContext):
+    await state.update_data(Арендатор = f'@{msg.from_user.username}')
+    await msg.answer('Оправьте, пожалуйста, свой номер телефона:', reply_markup=contact_asker)
+    await state.set_state(FSM_conference.phone)
+
+# @main_router.message(F.text == 'Открыть ссылку', StateFilter(None))
+# async def referencer(msg : types.Message):
+#     await msg.answer('Откройте ссылку', reply_markup=reference_button)
+
+@main_router.message(F.contact, StateFilter(FSM_conference.phone))
+async def haller(msg : types.Message, state : FSMContext):
+    await state.update_data(Телефон = msg.contact.phone_number)
+    await msg.answer('Выберите зал, который хотите забронировать:', reply_markup=conference_booking_mark_up)
+    await state.set_state(FSM_conference.hall)
+
+@main_router.message(F.text == 'Зал #1', StateFilter(FSM_conference.hall))
+async def orderer(msg : types.Message, state : FSMContext):
+    await state.update_data(Зал = msg.text)
+    await msg.answer('На какое число вы хотите забронировать зал\n(Укажите дату в формате ДД/ММ)', reply_markup=ReplyKeyboardRemove())
+    await state.set_state(FSM_conference.date)
+
+@main_router.message(F.text, StateFilter(FSM_conference.date))
+async def timetable(msg : types.Message, state : FSMContext):
+    if re.search(r'[a-zA-Za-яА-ЯёЁ]', msg.text) or '/' not in msg.text or len(msg.text) != 5:
+        await msg.answer('Вы неправильно ввели дату\nПопробуйте ещё раз')
+        await state.set_state(FSM_conference.date)
+        return
+    try:
+        middle_res = datetime.datetime.strptime(msg.text, '%d/%m')
+    except Exception:
+        await msg.answer('Вы неправильно ввели дату\nПопробуйте ещё раз')
+        await state.set_state(FSM_conference.date)
+        return
+    finally:
+        final_res = middle_res.strftime('%d/%m')
+        await state.update_data(Дата = final_res)
+        await msg.answer('Укажите время, когда начинается встреча в формате часы:минуты :')
+        await state.set_state(FSM_conference.timer_first)
+
+@main_router.message(F.text, StateFilter(FSM_conference.timer_first))
+async def first_timerr(msg : types.Message, state : FSMContext):
+    if re.search(r'[a-zA-Za-яА-ЯёЁ]', msg.text) or ':' not in msg.text or len(msg.text) < 4:
+        await msg.answer('Вы неправильно ввели время\nПопробуйте ещё раз')
+        await state.set_state(FSM_conference.timer_first)
+        return
+    try:
+        middle_res = datetime.datetime.strptime(msg.text, '%H:%M').time()
+    except Exception:
+        await msg.answer('Вы неправильно ввели время\nПопробуйте ещё раз')
+        await state.set_state(FSM_conference.timer_first)
+        return
+    finally:
+        final_res = middle_res.strftime('%H:%M')
+        await state.update_data(С = final_res)
+        await msg.answer('Укажите время, когда заканчивается встреча в формате часы:минуты :')
+        await state.set_state(FSM_conference.timer_second)
+
+@main_router.message(F.text, StateFilter(FSM_conference.timer_second))
+async def final_booking(msg : types.Message, state : FSMContext):
+    if re.search(r'[a-zA-Za-яА-ЯёЁ]', msg.text) or ':' not in msg.text or len(msg.text) < 4:
+        await msg.answer('Вы неправильно ввели время\nПопробуйте ещё раз')
+        await state.set_state(FSM_conference.timer_second)
+        return
+    try:
+        middle_res = datetime.datetime.strptime(msg.text, '%H:%M').time()
+    except Exception:
+        await msg.answer('Вы неправильно ввели время\nПопробуйте ещё раз')
+        await state.set_state(FSM_conference.timer_second)
+        return
+    finally:
+        final_res = middle_res.strftime('%H:%M')
+        await state.update_data(По = final_res)
+        dictionary = await state.get_data()
+        absolute_data.user = dictionary['Арендатор']
+        absolute_data.number = dictionary['Телефон']
+        absolute_data.hall = dictionary['Зал']
+        absolute_data.date = dictionary['Дата']
+        absolute_data.timer_first = dictionary['С']
+        absolute_data.timer_second = dictionary['По']
+        await msg.answer(f'Арендатор : {absolute_data.user}\nТелефонный номер : {absolute_data.number}\nЗал : {absolute_data.hall}\nДата : {absolute_data.date}\nС : {absolute_data.timer_first}\nПо : {absolute_data.timer_second}')
+        await state.clear()
+
+@main_router.message(F.text == 'Перенести бронь', StateFilter(None))
+async def postpone_booking(msg : types.Message, state : FSMContext):
+    if absolute_data.hall == None:
+        await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+        return
+    await state.update_data(Арендатор = absolute_data.user)
+    await state.update_data(Телефон = absolute_data.number)
+    await state.update_data(Зал = absolute_data.hall)
+    await msg.answer('Укажите число, на которое хотите перенести встречу:', reply_markup=ReplyKeyboardRemove())
+    await state.set_state(FSM_conference.date)
+
+@main_router.message(F.text == 'Отменить бронь')
+async def cancel_booking(msg : types.Message):
+    if absolute_data.hall == None:
+        await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+        return
+    absolute_data.user = None
+    absolute_data.number = None
+    absolute_data.hall = None
+    absolute_data.date = None
+    absolute_data.timer_first = None
+    absolute_data.timer_second = None
+    await msg.answer('Встреча успешно отменена', reply_markup=ReplyKeyboardRemove())
+
+
+
+# import datetime
+# import sqlite3
+# from aiogram import Router, types, F
+# from aiogram_calendar import SimpleCalendarCallback, SimpleCalendar
+# from aiogram.types import ReplyKeyboardRemove, CallbackQuery
+# from aiogram.filters import or_f, Command, CommandStart, StateFilter
+# from aiogram.fsm.state import StatesGroup, State
+# from aiogram.fsm.context import FSMContext
+# from keyboards import *
+
+# main_router = Router()
+
+# class booking_data():
+#     def __init__(self, user, number, hall, date, timer_first, timer_second):
+#         self.user = user
+#         self.number = number
+#         self.hall = hall
+#         self.date = date
+#         self.timer_first = timer_first
+#         self.timer_second = timer_second
+
+# absolute_data = booking_data(None, None, None, None, None, None)
+
+# class FSM_conference(StatesGroup):
+#     phone = State()
+#     hall = State()
+#     date = State()
+#     timer_first = State()
+#     timer_second = State()
+
+# @main_router.message(CommandStart(), StateFilter(None))
+# async def orderer(msg : types.Message):
+#     await msg.answer('Добро пожаловать!\nВыберите, что хотите сделать:', reply_markup=start_mark_up.as_markup(
+#         resize_keyboard = True,
+#         input_field_placeholder = 'Что хотите сделать?'
+#     ))
+
+# @main_router.message(F.text == 'Забронировать зал', StateFilter(None))
+# async def contacter(msg : types.Message, state : FSMContext):
+#     await state.update_data(Арендатор = f'@{msg.from_user.username}')
+#     await msg.answer('Оправьте, пожалуйста, свой номер телефона:', reply_markup=contact_asker)
+#     await state.set_state(FSM_conference.phone)
+
+# @main_router.message(F.text == 'Открыть ссылку', StateFilter(None))
+# async def referencer(msg : types.Message):
+#     await msg.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+
+# @main_router.message(F.contact, StateFilter(FSM_conference.phone))
+# async def haller(msg : types.Message, state : FSMContext):
+#     await state.update_data(Телефон = msg.contact.phone_number)
+#     await msg.answer('Выберите зал, который хотите забронировать:', reply_markup=conference_booking_mark_up)
+#     await state.set_state(FSM_conference.hall)
+
+# @main_router.message(F.text == 'Зал #1', StateFilter(FSM_conference.hall))
+# async def orderer(msg : types.Message, state : FSMContext):
+#     await state.update_data(Зал = msg.text)
+#     await msg.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+#     await state.set_state(FSM_conference.date)
+
+# @main_router.callback_query(SimpleCalendarCallback.filter(), StateFilter(FSM_conference.date))
+# async def calen(callback : CallbackQuery, callback_data : dict, state : FSMContext):
+#     selected, date = await SimpleCalendar().process_selection(callback, callback_data)
+#     if selected:
+#         await state.update_data(Дата = date.strftime('%d/%m'))
+#         await callback.message.answer('Укажите время, когда начинается встреча:', reply_markup=time_button.as_markup())
+#         await state.set_state(FSM_conference.timer_first)
+
+# @main_router.callback_query(StateFilter(FSM_conference.timer_first))
+# async def beginning(callback : CallbackQuery, state : FSMContext):
+#     await callback.answer()
+#     res = datetime.datetime.strptime(callback.data, '%H:%M')
+#     final_res = res.strftime('%H:%M')
+#     await state.update_data(С = final_res)
+#     await callback.message.edit_text('Укажите время, когда встреча заканчивается', reply_markup=time_button.as_markup())
+#     await state.set_state(FSM_conference.timer_second)
+
+# @main_router.callback_query(StateFilter(FSM_conference.timer_second))
+# async def ending(callback : CallbackQuery, state : FSMContext):
+#     await callback.answer()
+#     res = datetime.datetime.strptime(callback.data, '%H:%M')
+#     final_res = res.strftime('%H:%M')
+#     await state.update_data(По = final_res)
+#     dictionary = await state.get_data()
+    
+#     absolute_data.user = dictionary['Арендатор']
+#     absolute_data.number = dictionary['Телефон']
+#     absolute_data.hall = dictionary['Зал']
+#     absolute_data.date = dictionary['Дата']
+#     absolute_data.timer_first = dictionary['С']
+#     absolute_data.timer_second = dictionary['По']
+
+#     connection = sqlite3.connect('datebase.db')
+#     cursor = connection.cursor()
+#     query = '''
+#             CREATE TABLE IF NOT EXISTS user_booking_data(
+#             username TEXT,
+#             telephone_number TEXT,
+#             hall TEXT,
+#             date TEXT,
+#             time_of_begining TEXT,
+#             time_of_ending TEXT
+#             );
+#             '''
+#     adding_query = f'''
+#                     INSERT INTO user_booking_data(username, telephone_number, hall, date, time_of_beginning, time_of_ending) VALUES({absolute_data.user}, {absolute_data.number}, {absolute_data.hall}, {absolute_data.date}, { absolute_data.timer_first}, {absolute_data.timer_second});
+#                    '''
+#     cursor.execute(query)
+#     cursor.execute(adding_query)
+#     connection.commit()
+#     connection.close()
+
+#     await callback.message.answer('Бронирование прошло успешно', reply_markup=ReplyKeyboardRemove())
+#     await callback.message.answer(f'Арендатор : {absolute_data.user}\nТелефонный номер : {absolute_data.number}\nЗал : {absolute_data.hall}\nДата : {absolute_data.date}\nС : {absolute_data.timer_first}\nПо : {absolute_data.timer_second}', reply_markup=cancel_button.as_markup())
+#     await state.clear()
+
+# @main_router.message(F.text == 'Перенести бронь', StateFilter(None))
+# async def postpone_booking(msg : types.Message, state : FSMContext):
+#     if absolute_data.hall == None:
+#         await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+#         return
+#     await state.update_data(Арендатор = absolute_data.user)
+#     await state.update_data(Телефон = absolute_data.number)
+#     await state.update_data(Зал = absolute_data.hall)
+#     await msg.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+#     await state.set_state(FSM_conference.date)
+
+# @main_router.message(F.text == 'Отменить бронь')
+# async def cancel_booking(msg : types.Message, state : FSMContext):
+#     if absolute_data.hall == None:
+#         await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+#         return
+#     absolute_data.user = None
+#     absolute_data.number = None
+#     absolute_data.hall = None
+#     absolute_data.date = None
+#     absolute_data.timer_first = None
+#     absolute_data.timer_second = None
+#     await state.clear()
+#     await msg.answer('Встреча успешно отменена', reply_markup=ReplyKeyboardRemove())
+
+# @main_router.callback_query(F.data == 'cancelling')
+# async def call_for_cancel(callback : CallbackQuery, state : FSMContext):
+#     absolute_data.user = None
+#     absolute_data.number = None
+#     absolute_data.hall = None
+#     absolute_data.date = None
+#     absolute_data.timer_first = None
+#     absolute_data.timer_second = None
+#     await state.clear()
+#     await callback.answer()
+#     await callback.message.answer('Встреча успешно отменена', reply_markup=ReplyKeyboardRemove())
+
+
+
+
+
+import datetime
+import sqlite3
+from aiogram import Router, types, F
+from aiogram_calendar import SimpleCalendarCallback, SimpleCalendar
+from aiogram.types import ReplyKeyboardRemove, CallbackQuery
+from aiogram.filters import or_f, Command, CommandStart, StateFilter
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+from keyboards import *
+
+main_router = Router()
+
+class booking_data():
+    def __init__(self, user, number, hall, date, timer_first, timer_second):
+        self.user = user
+        self.number = number
+        self.hall = hall
+        self.date = date
+        self.timer_first = timer_first
+        self.timer_second = timer_second
+
+absolute_data = booking_data(None, None, None, None, None, None)
+
+class FSM_conference(StatesGroup):
+    phone = State()
+    hall = State()
+    date = State()
+    timer_first = State()
+    timer_second = State()
+    date_change = State()
+    timer_first_change = State()
+    timer_second_change = State()
+
+@main_router.message(CommandStart(), StateFilter(None))
+async def orderer(msg: types.Message):
+    await msg.answer('Добро пожаловать!\nВыберите, что хотите сделать:', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+
+@main_router.message(F.text == 'Забронировать зал', StateFilter(None))
+async def contacter(msg: types.Message, state: FSMContext):
+    await state.update_data(Арендатор=f'@{msg.from_user.username}')
+    await msg.answer('Оправьте, пожалуйста, свой номер телефона:', reply_markup=contact_asker)
+    await state.set_state(FSM_conference.phone)
+
+@main_router.message(F.contact, StateFilter(FSM_conference.phone))
+async def haller(msg: types.Message, state: FSMContext):
+    await state.update_data(Телефон=msg.contact.phone_number)
+    await msg.answer('Выберите зал, который хотите забронировать:', reply_markup=conference_booking_mark_up)
+    await state.set_state(FSM_conference.hall)
+
+@main_router.message(F.text == 'Зал #1', StateFilter(FSM_conference.hall))
+async def orderer(msg: types.Message, state: FSMContext):
+    await state.update_data(Зал=msg.text)
+    await msg.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+    await state.set_state(FSM_conference.date)
+
+
+# календарь
+@main_router.callback_query(SimpleCalendarCallback.filter(), StateFilter(FSM_conference.date))
+async def calen(callback: CallbackQuery, callback_data: dict, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback, callback_data)
+    if selected:
+        await state.update_data(Дата=date.strftime('%d/%m'))
+        await callback.message.answer('Укажите время, когда начинается встреча:', reply_markup=time_button.as_markup())
+        await state.set_state(FSM_conference.timer_first)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_first))
+async def beginning(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(С=final_res)
+    await callback.message.edit_text('Укажите время, когда встреча заканчивается', reply_markup=time_button.as_markup())
+    await state.set_state(FSM_conference.timer_second)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_second))
+async def ending(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(По=final_res)
+    dictionary = await state.get_data()
+
+    absolute_data.user = dictionary['Арендатор']
+    absolute_data.number = dictionary['Телефон']
+    absolute_data.hall = dictionary['Зал']
+    absolute_data.date = dictionary['Дата']
+    absolute_data.timer_first = dictionary['С']
+    absolute_data.timer_second = dictionary['По']
+    connection = sqlite3.connect('datebase.db')
+    cursor = connection.cursor()
+    query = '''
+            CREATE TABLE IF NOT EXISTS user_booking_data(
+            username TEXT,
+            telephone_number TEXT,
+            hall TEXT,
+            date TEXT,
+            time_of_beginning TEXT,
+            time_of_ending TEXT
+            );
+            '''
+    cursor.execute(query)
+    
+    adding_query = '''
+                    INSERT INTO user_booking_data (username, telephone_number, hall, date, time_of_begining, time_of_ending) 
+                    VALUES (?, ?, ?, ?, ?, ?);
+                   '''
+    cursor.execute(adding_query, (absolute_data.user, absolute_data.number, absolute_data.hall, absolute_data.date, absolute_data.timer_first, absolute_data.timer_second))
+    
+    connection.commit()
+    connection.close()
+
+    await callback.message.answer(f'Арендатор : {absolute_data.user}\nТелефонный номер : {absolute_data.number}\nЗал : {absolute_data.hall}\nДата : {absolute_data.date}\nС : {absolute_data.timer_first}\nПо : {absolute_data.timer_second}', reply_markup=cancel_button.as_markup())
+    await callback.message.answer('Бронирование прошло успешно', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+    await state.clear()
+
+@main_router.message(F.text == 'Перенести бронь', StateFilter(None))
+async def postpone_booking(msg: types.Message, state: FSMContext):
+    if absolute_data.hall is None:
+        await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+        return
+    # await state.update_data(Арендатор=absolute_data.user)
+    # await state.update_data(Телефон=absolute_data.number)
+    # await state.update_data(Зал=absolute_data.hall)
+    await msg.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+    await state.set_state(FSM_conference.date_change)
+
+@main_router.callback_query(SimpleCalendarCallback.filter(), StateFilter(FSM_conference.date_change))
+async def calen(callback: CallbackQuery, callback_data: dict, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback, callback_data)
+    if selected:
+        await state.update_data(Дата=date.strftime('%d/%m'))
+        await callback.message.answer('Укажите время, когда начинается встреча:', reply_markup=time_button.as_markup())
+        await state.set_state(FSM_conference.timer_first_change)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_first_change))
+async def beginning(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(С=final_res)
+    await callback.message.edit_text('Укажите время, когда встреча заканчивается', reply_markup=time_button.as_markup())
+    await state.set_state(FSM_conference.timer_second_change)
+
+# @main_router.callback_query(StateFilter(FSM_conference.timer_second_change))
+# async def ending(callback: CallbackQuery, state: FSMContext):
+#     await callback.answer()
+#     res = datetime.datetime.strptime(callback.data, '%H:%M')
+#     final_res = res.strftime('%H:%M')
+#     await state.update_data(По=final_res)
+#     dictionary = await state.get_data()
+
+#     connection = sqlite3.connect('datebase.db')
+#     cursor = connection.cursor()
+#     selection_query = f'''
+#                       SELECT username, telephone_number, hall FROM user_booking_data WHERE username = ?
+#                       '''
+#     cursor.execute(selection_query, f'@{callback.from_user.username}')
+#     res = cursor.fetchall()
+
+#     absolute_data.user = res[0]
+#     absolute_data.number = res[1]
+#     absolute_data.hall = res[2]
+#     absolute_data.date = dictionary['Дата']
+#     absolute_data.timer_first = dictionary['С']
+#     absolute_data.timer_second = dictionary['По']
+
+#     update_query = f'''
+#                     UPDATE user_booking_data
+#                     SET date = ?, time_of_begining = ?, time_of_ending = ?
+#                     WHERE username = @{callback.from_user.username} 
+#                    '''
+#     cursor.execute(update_query, (absolute_data.date, absolute_data.timer_first, absolute_data.timer_second))
+#     await callback.message.answer(f'Арендатор : {absolute_data.user}\nТелефонный номер : {absolute_data.number}\nЗал : {absolute_data.hall}\nДата : {absolute_data.date}\nС : {absolute_data.timer_first}\nПо : {absolute_data.timer_second}', reply_markup=cancel_button.as_markup())
+#     await callback.message.answer('Бронирование прошло успешно', reply_markup=start_mark_up.as_markup(
+#         resize_keyboard=True,
+#         input_field_placeholder='Что хотите сделать?'
+#     ))
+#     await state.clear()
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_second_change))
+async def ending(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(По=final_res)
+    dictionary = await state.get_data()
+
+    connection = sqlite3.connect('datebase.db')
+    cursor = connection.cursor()
+    
+    # Исправленный запрос на выборку данных
+    selection_query = '''
+                      SELECT username, telephone_number, hall 
+                      FROM user_booking_data 
+                      WHERE username = ?
+                      '''
+    cursor.execute(selection_query, (f'@{callback.from_user.username}',))
+    res = cursor.fetchone()
+
+    if res:
+        absolute_data.user = res[0]
+        absolute_data.number = res[1]
+        absolute_data.hall = res[2]
+    else:
+        await callback.message.answer('Данные пользователя не найдены.')
+        connection.close()
+        return
+
+    absolute_data.date = dictionary['Дата']
+    absolute_data.timer_first = dictionary['С']
+    absolute_data.timer_second = dictionary['По']
+
+    # Исправленный запрос на обновление данных
+    update_query = '''
+                    UPDATE user_booking_data
+                    SET date = ?, time_of_begining = ?, time_of_ending = ?
+                    WHERE username = ? 
+                   '''
+    cursor.execute(update_query, (absolute_data.date, absolute_data.timer_first, absolute_data.timer_second, f'@{callback.from_user.username}'))
+    
+    connection.commit()
+    connection.close()
+
+    await callback.message.answer(f'Арендатор : {absolute_data.user}\nТелефонный номер : {absolute_data.number}\nЗал : {absolute_data.hall}\nДата : {absolute_data.date}\nС : {absolute_data.timer_first}\nПо : {absolute_data.timer_second}', reply_markup=cancel_button.as_markup())
+    await callback.message.answer('Бронирование прошло успешно', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+    await state.clear()
+
+@main_router.message(F.text == 'Отменить бронь')
+async def cancel_booking(msg: types.Message, state: FSMContext):
+    if absolute_data.hall is None:
+        await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+        return
+    absolute_data.user = None
+    absolute_data.number = None
+    absolute_data.hall = None
+    absolute_data.date = None
+    absolute_data.timer_first = None
+    absolute_data.timer_second = None
+    await state.clear()
+    await msg.answer('Встреча успешно отменена', reply_markup=ReplyKeyboardRemove())
+
+@main_router.callback_query(F.data == 'cancelling')
+async def call_for_cancel(callback: CallbackQuery, state: FSMContext):
+    absolute_data.user = None
+    absolute_data.number = None
+    absolute_data.hall = None
+    absolute_data.date = None
+    absolute_data.timer_first = None
+    absolute_data.timer_second = None
+    await state.clear()
+    await callback.answer()
+    await callback.message.answer('Встреча успешно отменена', reply_markup=ReplyKeyboardRemove())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+последняя версия
+import datetime
+import sqlite3
+from aiogram import Router, types, F
+from aiogram_calendar import SimpleCalendarCallback, SimpleCalendar
+from aiogram.types import ReplyKeyboardRemove, CallbackQuery
+from aiogram.filters import or_f, Command, CommandStart, StateFilter
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+from keyboards import *
+
+main_router = Router()
+
+class booking_data():
+    def __init__(self, user, number, hall, date, timer_first, timer_second):
+        self.user = user
+        self.number = number
+        self.hall = hall
+        self.date = date
+        self.timer_first = timer_first
+        self.timer_second = timer_second
+
+absolute_data = booking_data(None, None, None, None, None, None)
+
+class FSM_conference(StatesGroup):
+    phone = State()
+    hall = State()
+    date = State()
+    timer_first = State()
+    timer_second = State()
+    date_change = State()
+    timer_first_change = State()
+    timer_second_change = State()
+
+@main_router.message(CommandStart(), StateFilter(None))
+async def orderer(msg: types.Message):
+    await msg.answer('Добро пожаловать!\nВыберите, что хотите сделать:', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+
+@main_router.message(F.text == 'Забронировать зал', StateFilter(None))
+async def contacter(msg: types.Message, state: FSMContext):
+    await state.update_data(Арендатор=f'@{msg.from_user.username}')
+    await msg.answer('Оправьте, пожалуйста, свой номер телефона:', reply_markup=contact_asker)
+    await state.set_state(FSM_conference.phone)
+
+@main_router.message(F.contact, StateFilter(FSM_conference.phone))
+async def haller(msg: types.Message, state: FSMContext):
+    await state.update_data(Телефон=msg.contact.phone_number)
+    await msg.answer('Выберите зал, который хотите забронировать:', reply_markup=conference_booking_mark_up)
+    await state.set_state(FSM_conference.hall)
+
+@main_router.message(F.text == 'Зал #1', StateFilter(FSM_conference.hall))
+async def orderer(msg: types.Message, state: FSMContext):
+    await state.update_data(Зал=msg.text)
+    await msg.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+    await state.set_state(FSM_conference.date)
+
+
+# календарь
+@main_router.callback_query(SimpleCalendarCallback.filter(), StateFilter(FSM_conference.date))
+async def calen(callback: CallbackQuery, callback_data: dict, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback, callback_data)
+    if selected:
+        await state.update_data(Дата=date.strftime('%d/%m'))
+        await callback.message.answer('Укажите время, когда начинается встреча:', reply_markup=time_button.as_markup())
+        await state.set_state(FSM_conference.timer_first)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_first))
+async def beginning(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(С=final_res)
+    await callback.message.edit_text('Укажите время, когда встреча заканчивается', reply_markup=time_button.as_markup())
+    await state.set_state(FSM_conference.timer_second)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_second))
+async def ending(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(По=final_res)
+    dictionary = await state.get_data()
+
+    absolute_data.user = dictionary['Арендатор']
+    absolute_data.number = dictionary['Телефон']
+    absolute_data.hall = dictionary['Зал']
+    absolute_data.date = dictionary['Дата']
+    absolute_data.timer_first = dictionary['С']
+    absolute_data.timer_second = dictionary['По']
+    connection = sqlite3.connect('datebase.db')
+    cursor = connection.cursor()
+    query = '''
+            CREATE TABLE IF NOT EXISTS user_booking_data(
+            username TEXT,
+            telephone_number TEXT,
+            hall TEXT,
+            date TEXT,
+            time_of_beginning TEXT,
+            time_of_ending TEXT
+            );
+            '''
+    cursor.execute(query)
+    
+    adding_query = '''
+                    INSERT INTO user_booking_data (username, telephone_number, hall, date, time_of_begining, time_of_ending) 
+                    VALUES (?, ?, ?, ?, ?, ?);
+                   '''
+    cursor.execute(adding_query, (absolute_data.user, absolute_data.number, absolute_data.hall, absolute_data.date, absolute_data.timer_first, absolute_data.timer_second))
+    
+    connection.commit()
+    connection.close()
+
+    await callback.message.answer(f'Арендатор : {absolute_data.user}\nТелефонный номер : {absolute_data.number}\nЗал : {absolute_data.hall}\nДата : {absolute_data.date}\nС : {absolute_data.timer_first}\nПо : {absolute_data.timer_second}', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+    await state.clear()
+
+@main_router.message(F.text == 'Перенести бронь', StateFilter(None))
+async def postpone_booking(msg: types.Message, state: FSMContext):
+    connection_object = sqlite3.connect('datebase.db')
+    cursor_object = connection_object.cursor()
+    query = '''
+            SELECT username FROM user_booking_data
+            '''
+    cursor_object.execute(query)
+    res = cursor_object.fetchall()
+
+    l = []
+    for i in res:
+        for r in i:
+            l.append(r)
+        
+    if f'@{msg.from_user.username}' not in l:
+        await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+        return
+    await msg.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+    await state.set_state(FSM_conference.date_change)
+
+@main_router.callback_query(SimpleCalendarCallback.filter(), StateFilter(FSM_conference.date_change))
+async def calen(callback: CallbackQuery, callback_data: dict, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback, callback_data)
+    if selected:
+        await state.update_data(Дата=date.strftime('%d/%m'))
+        await callback.message.answer('Укажите время, когда начинается встреча:', reply_markup=time_button.as_markup())
+        await state.set_state(FSM_conference.timer_first_change)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_first_change))
+async def beginning(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(С=final_res)
+    await callback.message.edit_text('Укажите время, когда встреча заканчивается', reply_markup=time_button.as_markup())
+    await state.set_state(FSM_conference.timer_second_change)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_second_change))
+async def ending(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(По=final_res)
+    dictionary = await state.get_data()
+
+    connection = sqlite3.connect('datebase.db')
+    cursor = connection.cursor()
+    
+    # Исправленный запрос на выборку данных
+    selection_query = '''
+                      SELECT username, telephone_number, hall 
+                      FROM user_booking_data 
+                      WHERE username = ?
+                      '''
+    cursor.execute(selection_query, (f'@{callback.from_user.username}',))
+    res = cursor.fetchone()
+
+    absolute_data.user = res[0]
+    absolute_data.number = res[1]
+    absolute_data.hall = res[2]
+
+    absolute_data.date = dictionary['Дата']
+    absolute_data.timer_first = dictionary['С']
+    absolute_data.timer_second = dictionary['По']
+
+    # Исправленный запрос на обновление данных
+    update_query = '''
+                    UPDATE user_booking_data
+                    SET date = ?, time_of_begining = ?, time_of_ending = ?
+                    WHERE username = ? 
+                   '''
+    cursor.execute(update_query, (absolute_data.date, absolute_data.timer_first, absolute_data.timer_second, f'@{callback.from_user.username}'))
+    
+    connection.commit()
+    connection.close()
+
+    await callback.message.answer(f'Арендатор : {absolute_data.user}\nТелефонный номер : {absolute_data.number}\nЗал : {absolute_data.hall}\nДата : {absolute_data.date}\nС : {absolute_data.timer_first}\nПо : {absolute_data.timer_second}', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+    await state.clear()
+
+@main_router.message(F.text == 'Отменить бронь')
+async def cancel_booking(msg: types.Message, state: FSMContext):
+    connection_object = sqlite3.connect('datebase.db')
+    cursor_object = connection_object.cursor()
+    query = '''
+            SELECT username FROM user_booking_data
+            '''
+    cursor_object.execute(query)
+    res = cursor_object.fetchall()
+
+    l = []
+    for i in res:
+        for r in i:
+            l.append(r)
+        
+    if f'@{msg.from_user.username}' not in l:
+        await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+        return
+    connection = sqlite3.connect('datebase.db')
+    cursor = connection.cursor()
+    query = '''
+            DELETE FROM user_booking_data 
+            WHERE username = ?
+            '''
+    cursor.execute(query, (f'@{msg.from_user.username}',))
+    connection.commit()
+    connection.close( )
+    absolute_data.user = None
+    absolute_data.number = None
+    absolute_data.hall = None
+    absolute_data.date = None
+    absolute_data.timer_first = None
+    absolute_data.timer_second = None
+    await state.clear()
+    await msg.answer('Встреча успешно отменена', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import datetime
+import sqlite3
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram import Router, types, F
+from aiogram_calendar import SimpleCalendarCallback, SimpleCalendar
+from aiogram.types import ReplyKeyboardRemove, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.filters import or_f, Command, CommandStart, StateFilter
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+from keyboards import *
+
+main_router = Router()
+
+class booking_data():
+    def __init__(self, user, number, hall, date, timer_first, timer_second, hall_elect, date_elect, time_of_begining_elect, time_of_ending_elect):
+        self.user = user
+        self.number = number
+        self.hall = hall
+        self.date = date
+        self.timer_first = timer_first
+        self.timer_second = timer_second
+        self.hall_elect = hall_elect
+        self.date_elect = date_elect
+        self.time_of_begining_elect = time_of_begining_elect
+        self.time_of_ending_elect = time_of_ending_elect
+
+absolute_data = booking_data(None, None, None, None, None, None, None, None, None, None)
+
+class FSM_conference(StatesGroup):
+    phone = State()
+    hall = State()
+    date = State()
+    timer_first = State()
+    timer_second = State()
+    elect = State()
+    date_change = State()
+    timer_first_change = State()
+    timer_second_change = State()
+
+@main_router.message(CommandStart(), StateFilter(None))
+async def orderer(msg: types.Message):
+    await msg.answer('Добро пожаловать!\nВыберите, что хотите сделать:', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+
+@main_router.message(F.text == 'Забронировать зал', StateFilter(None))
+async def contacter(msg: types.Message, state: FSMContext):
+    await state.update_data(Арендатор=f'@{msg.from_user.username}')
+    await msg.answer('Оправьте, пожалуйста, свой номер телефона:', reply_markup=contact_asker)
+    await state.set_state(FSM_conference.phone)
+
+@main_router.message(F.contact, StateFilter(FSM_conference.phone))
+async def haller(msg: types.Message, state: FSMContext):
+    await state.update_data(Телефон=msg.contact.phone_number)
+    await msg.answer('Выберите зал, который хотите забронировать:', reply_markup=conference_booking_mark_up)
+    await state.set_state(FSM_conference.hall)
+
+@main_router.message(F.text == 'Зал #1', StateFilter(FSM_conference.hall))
+async def orderer(msg: types.Message, state: FSMContext):
+    await state.update_data(Зал=msg.text)
+    await msg.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+    await state.set_state(FSM_conference.date)
+
+
+# календарь
+@main_router.callback_query(SimpleCalendarCallback.filter(), StateFilter(FSM_conference.date))
+async def calen(callback: CallbackQuery, callback_data: dict, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback, callback_data)
+    if selected:
+        await state.update_data(Дата=date.strftime('%d/%m'))
+        await callback.message.answer('Укажите время, когда начинается встреча:', reply_markup=time_button.as_markup())
+        await state.set_state(FSM_conference.timer_first)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_first))
+async def beginning(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(С=final_res)
+    await callback.message.edit_text('Укажите время, когда встреча заканчивается', reply_markup=time_button.as_markup())
+    await state.set_state(FSM_conference.timer_second)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_second))
+async def ending(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(По=final_res)
+    dictionary = await state.get_data()
+
+    absolute_data.user = dictionary['Арендатор']
+    absolute_data.number = dictionary['Телефон']
+    absolute_data.hall = dictionary['Зал']
+    absolute_data.date = dictionary['Дата']
+    absolute_data.timer_first = dictionary['С']
+    absolute_data.timer_second = dictionary['По']
+    connection = sqlite3.connect('datebase.db')
+    cursor = connection.cursor()
+    query = '''
+            CREATE TABLE IF NOT EXISTS user_booking_data(
+            username TEXT,
+            telephone_number TEXT,
+            hall TEXT,
+            date TEXT,
+            time_of_beginning TEXT,
+            time_of_ending TEXT
+            );
+            '''
+    cursor.execute(query)
+    
+    adding_query = '''
+                    INSERT INTO user_booking_data (username, telephone_number, hall, date, time_of_begining, time_of_ending) 
+                    VALUES (?, ?, ?, ?, ?, ?);
+                   '''
+    cursor.execute(adding_query, (absolute_data.user, absolute_data.number, absolute_data.hall, absolute_data.date, absolute_data.timer_first, absolute_data.timer_second))
+    
+    connection.commit()
+    connection.close()
+
+    await callback.message.answer(f'Арендатор : {absolute_data.user}\nТелефонный номер : {absolute_data.number}\nЗал : {absolute_data.hall}\nДата : {absolute_data.date}\nС : {absolute_data.timer_first}\nПо : {absolute_data.timer_second}', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+    await state.clear()
+
+@main_router.message(F.text == 'Перенести бронь', StateFilter(None))
+async def select_booking(msg: types.Message, state: FSMContext):
+    connection_object = sqlite3.connect('datebase.db')
+    cursor_object = connection_object.cursor()
+    query = '''
+            SELECT username FROM user_booking_data
+            '''
+    cursor_object.execute(query)
+    res = cursor_object.fetchall()
+
+    l = []
+    for i in res:
+        for r in i:
+            l.append(r)
+        
+    if f'@{msg.from_user.username}' not in l:
+        await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+        return
+    
+    searching_query = f'''
+                      SELECT hall, date, time_of_begining, time_of_ending FROM user_booking_data
+                      WHERE username = ?
+                      '''
+    cursor_object.execute(searching_query, (f'@{msg.from_user.username}',))
+    search_res = cursor_object.fetchall()
+    connection_object.commit()
+    connection_object.close()
+
+    count = 0
+
+    bookings_mark_up = InlineKeyboardBuilder()
+    for i in search_res:
+        count += 1
+        bookings_mark_up.add(InlineKeyboardButton(text=f'Зал: {i[0]}, на: {i[1]}, с: {i[2]}, по: {i[3]}', callback_data=f'Зал: {i[0]}, на: {i[1]}, с: {i[2]}\nпо: {i[3]}'))
+    bookings_mark_up.adjust(1)
+
+    await msg.answer('Выберите бронь, которую хотите перенести:', reply_markup=ReplyKeyboardRemove())
+    await msg.answer('Ваши брони:', reply_markup=bookings_mark_up.as_markup())
+    # await msg.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+    await state.set_state(FSM_conference.elect)
+
+@main_router.callback_query(StateFilter(FSM_conference.elect))
+async def postpone_booking(callback : CallbackQuery, state : FSMContext):
+    data = callback.data.replace('Зал:', '').replace(',', '').replace('на:', '').replace('с:', '').replace('по:', '')
+    absolute_data.hall_elect = data[0:7]
+    absolute_data.date_elect = data[9:14]
+    absolute_data.time_of_begining_elect = data[16:21]
+    absolute_data.time_of_ending_elect = data[23:28]
+    await callback.message.answer('Выберите дату:', reply_markup=await SimpleCalendar(locale='ru_Ru').start_calendar())
+    await state.set_state(FSM_conference.date_change)
+
+@main_router.callback_query(SimpleCalendarCallback.filter(), StateFilter(FSM_conference.date_change))
+async def calen(callback: CallbackQuery, callback_data: dict, state: FSMContext):
+    selected, date = await SimpleCalendar().process_selection(callback, callback_data)
+    if selected:
+        await state.update_data(Дата=date.strftime('%d/%m'))
+        await callback.message.answer('Укажите время, когда начинается встреча:', reply_markup=time_button.as_markup())
+        await state.set_state(FSM_conference.timer_first_change)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_first_change))
+async def beginning(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(С=final_res)
+    await callback.message.edit_text('Укажите время, когда встреча заканчивается', reply_markup=time_button.as_markup())
+    await state.set_state(FSM_conference.timer_second_change)
+
+@main_router.callback_query(StateFilter(FSM_conference.timer_second_change))
+async def ending(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    res = datetime.datetime.strptime(callback.data, '%H:%M')
+    final_res = res.strftime('%H:%M')
+    await state.update_data(По=final_res)
+    dictionary = await state.get_data()
+
+    connection = sqlite3.connect('datebase.db')
+    cursor = connection.cursor()
+    
+    # Исправленный запрос на выборку данных
+    selection_query = '''
+                      SELECT username, telephone_number, hall 
+                      FROM user_booking_data 
+                      WHERE username = ?
+                      '''
+    cursor.execute(selection_query, (f'@{callback.from_user.username}',))
+    res = cursor.fetchone()
+
+    absolute_data.user = res[0]
+    absolute_data.number = res[1]
+    absolute_data.hall = res[2]
+
+    absolute_data.date = dictionary['Дата']
+    absolute_data.timer_first = dictionary['С']
+    absolute_data.timer_second = dictionary['По']
+
+    # Исправленный запрос на обновление данных
+    update_query = '''
+                UPDATE user_booking_data
+                SET date = ?, time_of_begining = ?, time_of_ending = ?
+                WHERE username = ? AND hall = ? AND date = ? AND time_of_begining = ? AND time_of_ending = ? 
+               '''
+
+    await callback.message.answer(f'{absolute_data.hall_elect}, {absolute_data.date_elect}, {absolute_data.time_of_begining_elect}, {absolute_data.time_of_ending_elect}, {absolute_data.date}, {absolute_data.timer_first}, {absolute_data.timer_second}')
+    cursor.execute(update_query, (absolute_data.date, absolute_data.timer_first, absolute_data.timer_second, f'@{callback.from_user.username}', absolute_data.hall_elect, absolute_data.date_elect, absolute_data.time_of_begining_elect, absolute_data.time_of_ending_elect))
+    
+    connection.commit()
+    connection.close()
+
+    await callback.message.answer(f'Арендатор : {absolute_data.user}\nТелефонный номер : {absolute_data.number}\nЗал : {absolute_data.hall}\nДата : {absolute_data.date}\nС : {absolute_data.timer_first}\nПо : {absolute_data.timer_second}', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
+    await state.clear()
+
+@main_router.message(F.text == 'Отменить бронь')
+async def cancel_booking(msg: types.Message, state: FSMContext):
+    connection_object = sqlite3.connect('datebase.db')
+    cursor_object = connection_object.cursor()
+    query = '''
+            SELECT username FROM user_booking_data
+            '''
+    cursor_object.execute(query)
+    res = cursor_object.fetchall()
+
+    l = []
+    for i in res:
+        for r in i:
+            l.append(r)
+        
+    if f'@{msg.from_user.username}' not in l:
+        await msg.answer('Вы пока что ничего не бронировали', reply_markup=ReplyKeyboardRemove())
+        return
+    connection = sqlite3.connect('datebase.db')
+    cursor = connection.cursor()
+    query = '''
+            DELETE FROM user_booking_data 
+            WHERE username = ?
+            '''
+    cursor.execute(query, (f'@{msg.from_user.username}',))
+    connection.commit()
+    connection.close( )
+    absolute_data.user = None
+    absolute_data.number = None
+    absolute_data.hall = None
+    absolute_data.date = None
+    absolute_data.timer_first = None
+    absolute_data.timer_second = None
+    await state.clear()
+    await msg.answer('Встреча успешно отменена', reply_markup=start_mark_up.as_markup(
+        resize_keyboard=True,
+        input_field_placeholder='Что хотите сделать?'
+    ))
